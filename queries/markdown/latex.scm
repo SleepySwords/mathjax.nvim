@@ -1,0 +1,1 @@
+(displayed_equation) @latex
