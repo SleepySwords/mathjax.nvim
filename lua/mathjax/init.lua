@@ -3,19 +3,18 @@ local Job = require("plenary.job")
 local api = require("image")
 local globals = require("mathjax.globals")
 
-local query_function = vim.treesitter.query.parse(
-	"latex",
-	[[
-(displayed_equation _) @to_render
-]]
-)
-
 local parent = Path:new(vim.fn.fnamemodify(debug.getinfo(1).source:sub(2), ":h")):parent():parent()
 local mathjax_dir = Path:new(parent, Path:new("mathjax")).filename
 
 local M = {}
 
 function M.render_latex()
+	local query_function = vim.treesitter.query.parse(
+		"latex",
+		[[
+		(displayed_equation _) @to_render
+		]]
+	)
 	local syntax_tree = vim.treesitter.get_parser(0, "latex", {}):parse()
 	local root = syntax_tree[1]:root()
 
@@ -93,12 +92,5 @@ function M.render_latex()
 		end
 	end
 end
-
--- vim.api.nvim_create_autocmd("BufWritePost", {
--- 	pattern = "*.md",
--- 	callback = run,
--- })
-
-M.render_latex()
 
 return M
