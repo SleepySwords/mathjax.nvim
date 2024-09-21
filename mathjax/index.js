@@ -1,6 +1,7 @@
 const sharp = require('sharp');
 const filename = process.argv[2]
-const latex = process.argv.slice(3).join(" ")
+const colour = process.argv[3]
+const latex = process.argv.slice(4).join(" ")
 console.log(filename)
 console.log(latex)
 
@@ -12,7 +13,7 @@ require('mathjax').init({
   let svg = MathJax.startup.adaptor.outerHTML(texSvg)
   svg = svg.replace('<mjx-container class="MathJax" jax="SVG" display="true">', '')
   svg = svg.replace('</mjx-container>', '')
-  svg = svg.replaceAll('currentColor', 'white')
+  svg = svg.replaceAll('currentColor', colour)
   console.log(svg)
   const mathJaxSvg = Buffer.from(svg);
   sharp(mathJaxSvg, { density: 300 })

@@ -5,10 +5,31 @@ local globals = require("mathjax.globals")
 
 local parent = Path:new(vim.fn.fnamemodify(debug.getinfo(1).source:sub(2), ":h")):parent():parent()
 local mathjax_dir = Path:new(parent, Path:new("mathjax")).filename
+local config = globals.config
 
 local M = {}
 
-function M.render_latex()
+--- @class Config
+--- @field color? string
+
+--- Setup this plugin
+--- @param new_config? Config
+function M.setup(new_config)
+	-- FIXME: validate
+	config = vim.tbl_extend("force", config, new_config)
+end
+
+--- Setup this plugin
+--- @param local_config? Config
+function M.render_latex(local_config)
+	local con
+
+	if local_config ~= nil then
+		con = vim.tbl_extend("force", config, local_config)
+	else
+		con = config
+	end
+
 	local query_function = vim.treesitter.query.parse(
 		"markdown_inline",
 		[[
@@ -38,20 +59,16 @@ function M.render_latex()
 					end
 				end
 				-- FIXME: Use this hash to see if we need to replace or not.
-				local num = vim.fn.sha256(latex_text)
+				local num = vim.fn.sha256(latex_text .. con.color)
 				local url = globals.temp_dir .. "/" .. tostring(num) .. ".png"
 				local curr_win = vim.api.nvim_get_current_win()
 				local curr_buf = vim.api.nvim_get_current_buf()
 				Job:new({
 					command = "node",
-					args = { "index.js", url, latex_text },
+					args = { "index.js", url, con.color, latex_text },
 					cwd = mathjax_dir,
 					raw_args = true,
-					on_exit = function(result, r)
-						vim.schedule(function()
-							vim.print(result)
-							vim.print(r)
-						end)
+					on_exit = function(_result, _r)
 						local image = api.from_file(url, {
 							window = curr_win,
 							buffer = curr_buf,
@@ -62,8 +79,6 @@ function M.render_latex()
 							y = range[4],
 						})
 						vim.schedule(function()
-							vim.print(result)
-							vim.print(r)
 							if image ~= nil then
 								local has_rendered = true
 								image:render() -- render image
