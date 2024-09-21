@@ -10,12 +10,12 @@ local M = {}
 
 function M.render_latex()
 	local query_function = vim.treesitter.query.parse(
-		"latex",
+		"markdown_inline",
 		[[
-		(displayed_equation _) @to_render
+		(latex_block _) @to_render
 		]]
 	)
-	local syntax_tree = vim.treesitter.get_parser(0, "latex", {}):parse()
+	local syntax_tree = vim.treesitter.get_parser(0, "markdown_inline", {}):parse()
 	local root = syntax_tree[1]:root()
 
 	for _, i in ipairs(api.get_images()) do
@@ -31,7 +31,6 @@ function M.render_latex()
 				local range = vim.treesitter.get_range(matched_node, 0, nil)
 				local height = range[4] - range[1] + 1
 				latex_text = string.gsub(latex_text, "%$%$", "")
-				-- FIXME: Thie should be done via treesitter, but I'm too lazy
 				for line in string.gmatch(latex_text, "%% Lines: (%d*)") do
 					local line_parsed = tonumber(line)
 					if line_parsed ~= nil then
