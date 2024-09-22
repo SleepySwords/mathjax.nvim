@@ -2,20 +2,36 @@
 
 Maths in my neovim!?!
 
-You are able to specify math notation using Latex like syntax within two `$$`
+https://github.com/user-attachments/assets/3320d021-8239-45ab-9390-d152378ddcde
+
+# Motivation
+
+To be able to specify math notation using Latex like syntax within two `$$`
 inside a markdown file. This then renders your math symbols using Mathjax
-after running the lua function `render_latex`.
+after running the lua function `render_latex`, directly into your terminal
+if they support some sort of image rendering (such as Kitty).
 
 This plugin does not currently support inline latex, only Latex blocks are
 supported as of right now.
 
-
 # Usage
+
+
+Inside your markdown, you can specify Latex blocks using the two `$$`
+syntax like so
+```markdown
+$$
+\text{Hello world}
+y = mx + c
+$$
+```
+
+## Using the lua call
 
 Run the function `require('mathjax').render_latex()` to render any math blocks
 using mathjax.
 
-ou can either bind this to a keybind or set it as an autocommand to be able to
+You can either bind this to a keybind or set it as an autocommand to be able to
 run it on save:
 ```lua
 vim.api.nvim_create_autocmd('BufWritePost', {
@@ -24,14 +40,10 @@ vim.api.nvim_create_autocmd('BufWritePost', {
 })
 ```
 
-Then, inside your markdown, you can specify Latex blocks using the two `$$`
-syntax like so
-```markdown
-$$
-\text{Hello world}
-y = mx + c
-$$
-```
+## Using the command
+
+Alternatively, you could run the command `:Mathjax` to do the same thing
+(options must be specified in the `setup` function in this case).
 
 # Dependencies
 
@@ -42,14 +54,14 @@ $$
       packages (whether it is yarn, npm, etc...)
 - image.nvim
 - Treesitter
-    - You must have the Latex and markdown parser installed.
-    - This can be installed via `:TSInstall latex`
+    - You must have the Latex, markdown and markdown inline parser installed.
+    - This can be installed via `:TSInstall latex markdown markdown_inline`
 
 # Installation
 
 Use a package manager to install `mathjax.nvim`. Be sure to follow the
 installation instructions of [image.nvim](https://github.com/3rd/image.nvim) as
-that requires some magick luarocks to be installed to be able to work.
+that requires the magick luarocks to be installed to be able to work.
 
 ## via Lazy using yarn
 ```lua
@@ -61,13 +73,14 @@ that requires some magick luarocks to be installed to be able to work.
       'nvim-lua/plenary.nvim',
       'nvim-treesitter/nvim-treesitter',
       '3rd/image.nvim'
-    }
+    },
+    opts = {}
 }
 ```
 
 # Options
 
-Options can be passed into either by the `setup` function, which sets the config
+Options can be passed into either by the `setup` function, which sets the options
 globally, or the `render_latex` function which sets them locally. Note: passing
 in options to either of these functions is optional.
 
@@ -84,9 +97,9 @@ Property: Value`
 
 ## Latex option table
 
-| Property | Type    | Description                                                                                                                   |
-|----------|---------|------------------------------------------------------------------------------------------------------------------------------ |
-| Lines    | integer? | Specifies the amount of lines this particular latex block should take, note: currently only makes images smaller, not bigger |
+| Property | Type    | Description                                                                                            |
+|----------|---------|------------------------------------------------------------------------------------------------------- |
+| Lines    | integer? | Specifies the amount of lines this particular latex block should take, note: this may not always work |
 
 ## Example
 
