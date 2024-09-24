@@ -57,14 +57,9 @@ local function handle_matched_node(matched_node, con)
 				if image ~= nil then
 					local has_rendered = true
 					image:render() -- render image
-					globals.stale_images[image.id] = false
-					vim.api.nvim_create_autocmd("BufEnter", {
+					local autocmd_id = vim.api.nvim_create_autocmd("BufEnter", {
 						callback = function()
-							if
-								globals.stale_images[image.id] == false
-								and has_rendered == false
-								and vim.api.nvim_get_current_buf() == curr_buf
-							then
+							if has_rendered == false and curr_buf == vim.api.nvim_get_current_buf() then
 								image:render()
 								has_rendered = true
 							else
@@ -73,6 +68,7 @@ local function handle_matched_node(matched_node, con)
 							end
 						end,
 					})
+					globals.autocmd_ids[image.id] = autocmd_id
 				end
 			end)
 		end,
@@ -101,7 +97,9 @@ function M.render_latex(local_config)
 
 	for _, i in ipairs(api.get_images()) do
 		i:clear()
-		globals.stale_images[i.id] = true
+
+		vim.api.nvim_del_autocmd(globals.autocmd_ids[i.id])
+		globals.autocmd_ids[i.id] = nil
 	end
 
 	for _, match, _ in query_function:iter_matches(root, 0, nil, nil, { all = true }) do
