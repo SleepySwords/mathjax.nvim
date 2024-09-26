@@ -19,6 +19,34 @@ function M.setup(new_config)
 	config = vim.tbl_extend("force", config, new_config)
 end
 
+local function render_image(url, win, buff, x, y, height)
+	local image = api.from_file(tostring(url), {
+		window = win,
+		buffer = buff,
+		with_virtual_padding = true,
+		inline = true,
+		x = 0,
+		height = height,
+		y = y,
+	})
+	if image ~= nil then
+		local has_rendered = true
+		image:render() -- render image
+		local autocmd_id = vim.api.nvim_create_autocmd("BufEnter", {
+			callback = function()
+				if has_rendered == false and buff == vim.api.nvim_get_current_buf() then
+					image:render()
+					has_rendered = true
+				else
+					image:clear()
+					has_rendered = false
+				end
+			end,
+		})
+		globals.autocmd_ids[image.id] = autocmd_id
+	end
+end
+
 --- Creates a job to render an image and put the image on the screen for this node
 --- @param matched_node TSNode
 --- @param con Config
@@ -35,44 +63,25 @@ local function handle_matched_node(matched_node, con)
 	end
 	-- FIXME: Use this hash to see if we need to replace or not.
 	local num = vim.fn.sha256(latex_text .. con.color)
-	local url = globals.temp_dir .. "/" .. tostring(num) .. ".png"
+	local url = Path:new(globals.temp_dir, tostring(num) .. ".png")
+	-- FIXME: do all windows with the current buffer.
 	local curr_win = vim.api.nvim_get_current_win()
 	local curr_buf = vim.api.nvim_get_current_buf()
-	Job:new({
-		command = "node",
-		args = { "index.js", url, con.color, latex_text },
-		cwd = mathjax_dir,
-		raw_args = true,
-		on_exit = function(_result, _r)
-			local image = api.from_file(url, {
-				window = curr_win,
-				buffer = curr_buf,
-				with_virtual_padding = true,
-				inline = true,
-				x = 0,
-				height = height,
-				y = range[4],
-			})
-			vim.schedule(function()
-				if image ~= nil then
-					local has_rendered = true
-					image:render() -- render image
-					local autocmd_id = vim.api.nvim_create_autocmd("BufEnter", {
-						callback = function()
-							if has_rendered == false and curr_buf == vim.api.nvim_get_current_buf() then
-								image:render()
-								has_rendered = true
-							else
-								image:clear()
-								has_rendered = false
-							end
-						end,
-					})
-					globals.autocmd_ids[image.id] = autocmd_id
-				end
-			end)
-		end,
-	}):start()
+	if url:exists() then
+		render_image(tostring(url), curr_win, curr_buf, 0, range[4], height)
+	else
+		Job:new({
+			command = "node",
+			args = { "index.js", tostring(url), con.color, latex_text },
+			cwd = mathjax_dir,
+			raw_args = true,
+			on_exit = function(_result, _r)
+				vim.schedule(function()
+					render_image(tostring(url), curr_win, curr_buf, 0, range[4], height)
+				end)
+			end,
+		}):start()
+	end
 end
 
 --- Render the latex for this buffer.
