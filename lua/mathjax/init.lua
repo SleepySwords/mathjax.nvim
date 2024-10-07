@@ -6,11 +6,17 @@ local globals = require("mathjax.globals")
 local parent = Path:new(vim.fn.fnamemodify(debug.getinfo(1).source:sub(2), ":h")):parent():parent()
 local mathjax_dir = Path:new(parent, Path:new("mathjax")).filename
 local config = globals.config
+local name = vim.api.nvim_create_namespace("mathjax_inlines")
+local inline_ids = {}
+
+local latex_images = {}
 
 local M = {}
 
 --- @class Config
 --- @field color? string
+
+--- @class LatexImage
 
 --- Setup this plugin
 --- @param new_config? Config
@@ -19,31 +25,89 @@ function M.setup(new_config)
 	config = vim.tbl_extend("force", config, new_config)
 end
 
-local function render_image(url, win, buff, x, y, height)
+local function render_image(url, win, buff, x, y, height, virtual_padding)
 	local image = api.from_file(tostring(url), {
 		window = win,
 		buffer = buff,
-		with_virtual_padding = true,
+		with_virtual_padding = virtual_padding,
 		inline = true,
-		x = 0,
+		x = x,
 		height = height,
 		y = y,
 	})
+
+	latex_images[image.id] = {
+		shown = true,
+		buf_enter_autocmd = nil,
+	}
+
 	if image ~= nil then
-		local has_rendered = true
 		image:render() -- render image
 		local autocmd_id = vim.api.nvim_create_autocmd("BufEnter", {
 			callback = function()
-				if has_rendered == false and buff == vim.api.nvim_get_current_buf() then
+				if latex_images[image.id].shown == false and buff == vim.api.nvim_get_current_buf() then
 					image:render()
-					has_rendered = true
+					latex_images[image.id].shown = true
 				else
 					image:clear()
-					has_rendered = false
+					latex_images[image.id].shown = false
 				end
 			end,
 		})
-		globals.autocmd_ids[image.id] = autocmd_id
+		latex_images[image.id].buf_enter_autocmd = autocmd_id
+	end
+	return image
+end
+
+local function create_job_and_render(text, colour, x, y, height, inline)
+	local num = vim.fn.sha256(text .. colour)
+	local url = Path:new(globals.temp_dir, tostring(num) .. ".png")
+	-- FIXME: do all windows with the current buffer.
+	local curr_win = vim.api.nvim_get_current_win()
+	local curr_buf = vim.api.nvim_get_current_buf()
+	if url:exists() then
+		render_image(tostring(url), curr_win, curr_buf, x, y, height, not inline)
+	else
+		Job:new({
+			command = "node",
+			args = { "index.js", tostring(url), colour, text },
+			cwd = mathjax_dir,
+			raw_args = true,
+			on_exit = function(_result, _r)
+				vim.schedule(function()
+					local image = render_image(tostring(url), curr_win, curr_buf, x, y, height, not inline)
+					if image ~= nil and inline then
+						local id = vim.api.nvim_buf_set_extmark(0, name, y, x, {
+							virt_text_pos = "inline",
+							virt_text = { { (" "):rep(image.rendered_geometry.width) } },
+						})
+						local cursor_move_cmd = vim.api.nvim_create_autocmd("CursorMoved", {
+							callback = function()
+								local cursor = vim.api.nvim_win_get_cursor(0)
+								vim.print(y, cursor[1])
+								if cursor[1] - 1 == y then
+									image:clear()
+									vim.api.nvim_buf_del_extmark(0, name, id)
+									latex_images[image.id].shown = false
+								else
+									if latex_images[image.id].shown == false then
+										image:render()
+										id = vim.api.nvim_buf_set_extmark(0, name, y, x, {
+											virt_text_pos = "inline",
+											virt_text = { { (" "):rep(image.rendered_geometry.width) } },
+										})
+										table.insert(inline_ids, id)
+										latex_images[image.id].shown = true
+									end
+								end
+							end,
+						})
+						latex_images[image.id].cursor_move_cmd = cursor_move_cmd
+						table.insert(inline_ids, id)
+					end
+				end)
+			end,
+		}):start()
 	end
 end
 
@@ -61,27 +125,14 @@ local function handle_matched_node(matched_node, con)
 			height = line_parsed
 		end
 	end
-	-- FIXME: Use this hash to see if we need to replace or not.
-	local num = vim.fn.sha256(latex_text .. con.color)
-	local url = Path:new(globals.temp_dir, tostring(num) .. ".png")
-	-- FIXME: do all windows with the current buffer.
-	local curr_win = vim.api.nvim_get_current_win()
-	local curr_buf = vim.api.nvim_get_current_buf()
-	if url:exists() then
-		render_image(tostring(url), curr_win, curr_buf, 0, range[4], height)
-	else
-		Job:new({
-			command = "node",
-			args = { "index.js", tostring(url), con.color, latex_text },
-			cwd = mathjax_dir,
-			raw_args = true,
-			on_exit = function(_result, _r)
-				vim.schedule(function()
-					render_image(tostring(url), curr_win, curr_buf, 0, range[4], height)
-				end)
-			end,
-		}):start()
+	-- FIXME: This shoudl start with the pattern?
+	for inline in latex_text:gmatch("%$(.+)%$$") do
+		create_job_and_render(inline, con.color, range[2], range[1], 1, true)
+
+		return
 	end
+
+	create_job_and_render(latex_text, con.color, range[2], range[4], height, false)
 end
 
 --- Render the latex for this buffer.
@@ -98,7 +149,7 @@ function M.render_latex(local_config)
 	local query_function = vim.treesitter.query.parse(
 		"markdown_inline",
 		[[
-		(latex_block _) @to_render
+		(latex_block _) @conceal (#set! conceal "")
 		]]
 	)
 	local syntax_tree = vim.treesitter.get_parser(0, "markdown_inline", {}):parse()
@@ -106,9 +157,19 @@ function M.render_latex(local_config)
 
 	for _, i in ipairs(api.get_images()) do
 		i:clear()
+	end
 
-		vim.api.nvim_del_autocmd(globals.autocmd_ids[i.id])
-		globals.autocmd_ids[i.id] = nil
+	for k, v in pairs(latex_images) do
+		vim.api.nvim_del_autocmd(v.buf_enter_autocmd)
+		if v.cursor_move_cmd ~= nil then
+			vim.api.nvim_del_autocmd(v.cursor_move_cmd)
+		end
+		latex_images[k] = nil
+	end
+
+	for i, id in ipairs(inline_ids) do
+		vim.api.nvim_buf_del_extmark(0, name, id)
+		inline_ids[i] = nil
 	end
 
 	for _, match, _ in query_function:iter_matches(root, 0, nil, nil, { all = true }) do
