@@ -59,6 +59,9 @@ local function render_image(url, win, buff, x, y, height, virtual_padding)
 	return image
 end
 
+local function register_inline_images_autocmds()
+end
+
 local function create_job_and_render(text, colour, x, y, height, inline)
 	local num = vim.fn.sha256(text .. colour)
 	local url = Path:new(globals.temp_dir, tostring(num) .. ".png")
@@ -66,48 +69,87 @@ local function create_job_and_render(text, colour, x, y, height, inline)
 	local curr_win = vim.api.nvim_get_current_win()
 	local curr_buf = vim.api.nvim_get_current_buf()
 	if url:exists() then
-		render_image(tostring(url), curr_win, curr_buf, x, y, height, not inline)
-	else
-		Job:new({
-			command = "node",
-			args = { "index.js", tostring(url), colour, text },
-			cwd = mathjax_dir,
-			raw_args = true,
-			on_exit = function(_result, _r)
-				vim.schedule(function()
-					local image = render_image(tostring(url), curr_win, curr_buf, x, y, height, not inline)
-					if image ~= nil and inline then
-						local id = vim.api.nvim_buf_set_extmark(0, name, y, x, {
-							virt_text_pos = "inline",
-							virt_text = { { (" "):rep(image.rendered_geometry.width) } },
-						})
-						local cursor_move_cmd = vim.api.nvim_create_autocmd("CursorMoved", {
-							callback = function()
-								local cursor = vim.api.nvim_win_get_cursor(0)
-								vim.print(y, cursor[1])
-								if cursor[1] - 1 == y then
-									image:clear()
-									vim.api.nvim_buf_del_extmark(0, name, id)
-									latex_images[image.id].shown = false
-								else
-									if latex_images[image.id].shown == false then
-										image:render()
-										id = vim.api.nvim_buf_set_extmark(0, name, y, x, {
-											virt_text_pos = "inline",
-											virt_text = { { (" "):rep(image.rendered_geometry.width) } },
-										})
-										table.insert(inline_ids, id)
-										latex_images[image.id].shown = true
-									end
-								end
-							end,
-						})
-						latex_images[image.id].cursor_move_cmd = cursor_move_cmd
-						table.insert(inline_ids, id)
+		local image = render_image(tostring(url), curr_win, curr_buf, x, y, height, not inline)
+		if image ~= nil and inline then
+			-- FIXME: filter images on the same line
+			for _, o in ipairs(api.get_images()) do
+				o:clear()
+				o:render()
+			end
+			local image_width = image.rendered_geometry.width
+			local id = vim.api.nvim_buf_set_extmark(0, name, y, x, {
+				virt_text_pos = "inline",
+				virt_text = { { (" "):rep(image_width) } },
+			})
+			local cursor_move_cmd = vim.api.nvim_create_autocmd("CursorMoved", {
+				callback = function()
+					local cursor = vim.api.nvim_win_get_cursor(0)
+					vim.print(y, cursor[1])
+					if cursor[1] - 1 == y then
+						image:clear()
+						vim.api.nvim_buf_del_extmark(0, name, id)
+						latex_images[image.id].shown = false
+					else
+						-- FIXME: ensure this is the correct buffer...
+						if latex_images[image.id].shown == false then
+							id = vim.api.nvim_buf_set_extmark(0, name, y, x, {
+								virt_text_pos = "inline",
+								virt_text = { { (" "):rep(image_width) } },
+							})
+							image:render()
+							table.insert(inline_ids, id)
+							latex_images[image.id].shown = true
+						end
 					end
-				end)
-			end,
-		}):start()
+				end,
+			})
+			latex_images[image.id].cursor_move_cmd = cursor_move_cmd
+			table.insert(inline_ids, id)
+		end
+	else
+		Job
+			:new({
+				command = "node",
+				args = { "index.js", tostring(url), colour, text },
+				cwd = mathjax_dir,
+				raw_args = true,
+				on_exit = function(_result, _r)
+					vim.schedule(function()
+						local image = render_image(tostring(url), curr_win, curr_buf, x, y, height, not inline)
+						if image ~= nil and inline and image.rendered_geometry.width ~= nil then
+							local image_width = image.rendered_geometry.width
+							local id = vim.api.nvim_buf_set_extmark(0, name, y, x, {
+								virt_text_pos = "inline",
+								virt_text = { { (" "):rep(image_width) } },
+							})
+							local cursor_move_cmd = vim.api.nvim_create_autocmd("CursorMoved", {
+								callback = function()
+									local cursor = vim.api.nvim_win_get_cursor(0)
+									vim.print(y, cursor[1])
+									if cursor[1] - 1 == y then
+										image:clear()
+										vim.api.nvim_buf_del_extmark(0, name, id)
+										latex_images[image.id].shown = false
+									else
+										if latex_images[image.id].shown == false then
+											id = vim.api.nvim_buf_set_extmark(0, name, y, x, {
+												virt_text_pos = "inline",
+												virt_text = { { (" "):rep(image_width) } },
+											})
+											image:render()
+											table.insert(inline_ids, id)
+											latex_images[image.id].shown = true
+										end
+									end
+								end,
+							})
+							latex_images[image.id].cursor_move_cmd = cursor_move_cmd
+							table.insert(inline_ids, id)
+						end
+					end)
+				end,
+			})
+			:start()
 	end
 end
 
