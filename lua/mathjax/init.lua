@@ -50,6 +50,7 @@ local function render_image(url, win, buff, x, y, height, virtual_padding)
         if
           latex_images[image.id].shown == false
           and buff == vim.api.nvim_get_current_buf()
+          and win == vim.api.nvim_get_current_win()
         then
           image:render()
           latex_images[image.id].shown = true
@@ -64,7 +65,14 @@ local function render_image(url, win, buff, x, y, height, virtual_padding)
   return image
 end
 
-local function register_inline_images_autocmds(image, x, y, image_width)
+local function register_inline_images_autocmds(
+  buffer,
+  win,
+  image,
+  x,
+  y,
+  image_width
+)
   if latex_images[image.id].inline_extmark ~= nil then
     vim.api.nvim_buf_del_extmark(
       0,
@@ -79,7 +87,11 @@ local function register_inline_images_autocmds(image, x, y, image_width)
       virt_text = { { (" "):rep(image_width) } },
     })
   local cursor_move_cmd = vim.api.nvim_create_autocmd("CursorMoved", {
+    buffer = buffer,
     callback = function()
+      if vim.api.nvim_get_current_win() ~= win then
+        return
+      end
       local cursor = vim.api.nvim_win_get_cursor(0)
       if cursor[1] - 1 == y then
         image:clear()
@@ -120,54 +132,78 @@ end
 local function create_job_and_render(text, colour, x, y, height, inline)
   local num = vim.fn.sha256(text .. colour)
   local url = Path:new(globals.temp_dir, tostring(num) .. ".png")
-  -- FIXME: do all windows with the current buffer.
-  local curr_win = vim.api.nvim_get_current_win()
   local curr_buf = vim.api.nvim_get_current_buf()
-  if url:exists() then
-    local image =
-      render_image(tostring(url), curr_win, curr_buf, x, y, height, not inline)
-    if image ~= nil and inline and image.rendered_geometry.width then
-      local image_width = image.rendered_geometry.width
-      -- FIXME: filter images on the same line
-      for _, o in ipairs(api.get_images()) do
-        if
-          o.rendered_geometry.y
-          and o.rendered_geometry.y == image.rendered_geometry.x
-        then
-          o:clear()
-          o:render()
-        end
-      end
-      register_inline_images_autocmds(image, x, y, image_width)
-    end
-  else
-    Job:new({
-      command = "node",
-      args = { "index.js", tostring(url), colour, text },
-      cwd = mathjax_dir,
-      raw_args = true,
-      on_exit = function(_result, _r)
-        vim.schedule(function()
-          local image = render_image(
-            tostring(url),
-            curr_win,
-            curr_buf,
-            x,
-            y,
-            height,
-            not inline
-          )
+  local current_buf_windows = vim.tbl_filter(function(win)
+    return vim.api.nvim_win_get_buf(win) == curr_buf
+  end, vim.api.nvim_tabpage_list_wins(0))
+  for _, curr_win in ipairs(current_buf_windows) do
+    if url:exists() then
+      local image = render_image(
+        tostring(url),
+        curr_win,
+        curr_buf,
+        x,
+        y,
+        height,
+        not inline
+      )
+      if image ~= nil and inline and image.rendered_geometry.width then
+        local image_width = image.rendered_geometry.width
+        -- FIXME: filter images on the same line
+        for _, o in ipairs(api.get_images()) do
           if
-            image ~= nil
-            and inline
-            and image.rendered_geometry.width ~= nil
+            o.rendered_geometry.y
+            and o.rendered_geometry.y == image.rendered_geometry.x
           then
-            local image_width = image.rendered_geometry.width
-            register_inline_images_autocmds(image, x, y, image_width)
+            o:clear()
+            o:render()
           end
-        end)
-      end,
-    }):start()
+        end
+        register_inline_images_autocmds(
+          curr_buf,
+          curr_win,
+          image,
+          x,
+          y,
+          image_width
+        )
+      end
+    else
+      Job:new({
+        command = "node",
+        args = { "index.js", tostring(url), colour, text },
+        cwd = mathjax_dir,
+        raw_args = true,
+        on_exit = function(_result, _r)
+          vim.schedule(function()
+            local image = render_image(
+              tostring(url),
+              curr_win,
+              curr_buf,
+              x,
+              y,
+              height,
+              not inline
+            )
+            if
+              image ~= nil
+              and inline
+              and image.rendered_geometry.width ~= nil
+            then
+              local image_width = image.rendered_geometry.width
+              register_inline_images_autocmds(
+                curr_buf,
+                curr_win,
+                image,
+                x,
+                y,
+                image_width
+              )
+            end
+          end)
+        end,
+      }):start()
+    end
   end
 end
 
@@ -207,6 +243,7 @@ local function handle_matched_node(matched_node, con)
   end
 end
 
+-- FIXME: currently deletes thing that are not part of the refreshed buffer.
 local function clear_all()
   for _, i in ipairs(api.get_images()) do
     i:clear()
